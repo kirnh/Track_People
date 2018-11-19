@@ -13,6 +13,9 @@ from deep_sort import nn_matching
 from deep_sort.detection import Detection
 from deep_sort.tracker import Tracker
 
+from detect_people import Detector
+from generate_frames import generate_frames
+
 
 def gather_sequence_info(sequence_dir, detection_file):
     """Gather sequence information, such as image filenames, detections,
@@ -40,7 +43,8 @@ def gather_sequence_info(sequence_dir, detection_file):
         * max_frame_idx: Index of the last frame.
 
     """
-    image_dir = os.path.join(sequence_dir, "img1")
+    # image_dir = os.path.join(sequence_dir, "img1")
+    image_dir = sequence_dir
     image_filenames = {
         int(os.path.splitext(f)[0]): os.path.join(image_dir, f)
         for f in os.listdir(image_dir)}
@@ -126,7 +130,7 @@ def create_detections(detection_mat, frame_idx, min_height=0):
     return detection_list
 
 
-def run(sequence_dir, detection_file, output_file, min_confidence,
+def run(sequence_dir, detector, output_file, min_confidence,
         nms_max_overlap, min_detection_height, max_cosine_distance,
         nn_budget, display):
     """Run multi-target tracker on a particular sequence.
@@ -135,11 +139,8 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
     ----------
     sequence_dir : str
         Path to the MOTChallenge sequence directory.
-    detection_file : str
-        Path to the detections file.
     output_file : str
-        Path to the tracking output file. This file will contain the tracking
-        results on completion.
+        Path to the tracking output video.
     min_confidence : float
         Detection confidence threshold. Disregard all detections that have
         a confidence lower than this value.
@@ -157,7 +158,7 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
         If True, show visualization of intermediate tracking results.
 
     """
-    seq_info = gather_sequence_info(sequence_dir, detection_file)
+    seq_info = gather_sequence_info(sequence_dir, None)
     metric = nn_matching.NearestNeighborDistanceMetric(
         "cosine", max_cosine_distance, nn_budget)
     tracker = Tracker(metric)
@@ -167,8 +168,8 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
         print("Processing frame %05d" % frame_idx)
 
         # Load image and generate detections.
-        detections = create_detections(
-            seq_info["detections"], frame_idx, min_detection_height)
+        image_id = ('00000000000000000000000000'+str(frame_idx))[-6:]
+        detections = detector.get_detections(os.path.join(sequence_dir, '{}.jpg'.format(image_id)))
         detections = [d for d in detections if d.confidence >= min_confidence]
 
         # Run non-maxima suppression.
@@ -200,36 +201,25 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
 
     # Run tracker.
     if display:
-        visualizer = visualization.Visualization(seq_info, update_ms=5)
+        visualizer = visualization.Visualization(seq_info, update_ms=5, output_video_file=output_file)
     else:
         visualizer = visualization.NoVisualization(seq_info)
     visualizer.run(frame_callback)
-
-    # Store results.
-    f = open(output_file, 'w')
-    for row in results:
-        print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (
-            row[0], row[1], row[2], row[3], row[4], row[5]),file=f)
-
 
 def parse_args():
     """ Parse command line arguments.
     """
     parser = argparse.ArgumentParser(description="Deep SORT")
     parser.add_argument(
-        "--sequence_dir", help="Path to MOTChallenge sequence directory",
+        "--video_path", help="Path to video",
         default=None, required=True)
     parser.add_argument(
-        "--detection_file", help="Path to custom detections.", default=None,
-        required=True)
-    parser.add_argument(
-        "--output_file", help="Path to the tracking output file. This file will"
-        " contain the tracking results on completion.",
-        default="/tmp/hypotheses.txt")
+        "--output_file", help="Path to the tracking output video.",
+        default=None)
     parser.add_argument(
         "--min_confidence", help="Detection confidence threshold. Disregard "
         "all detections that have a confidence lower than this value.",
-        default=0.8, type=float)
+        default=0.3, type=float)
     parser.add_argument(
         "--min_detection_height", help="Threshold on the detection bounding "
         "box height. Detections with height smaller than this value are "
@@ -242,7 +232,7 @@ def parse_args():
         "metric (object appearance).", type=float, default=0.2)
     parser.add_argument(
         "--nn_budget", help="Maximum size of the appearance descriptors "
-        "gallery. If None, no budget is enforced.", type=int, default=None)
+        "gallery. If None, no budget is enforced.", type=int, default=128)
     parser.add_argument(
         "--display", help="Show intermediate tracking results",
         default=True, type=bool)
@@ -251,7 +241,17 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    
+    generate_frames(args.video_path)
+
+    yolo_config = './YOLOv3/config/yolov3.cfg'
+    yolo_weights = './yolov3.weights'
+    reid_net_weights = './mars-small128.pb'
+    detector = Detector('./images')
+    detector.setup_YOLO(yolo_config, yolo_weights)
+    detector.setup_feature_extractor(reid_net_weights)
+    
     run(
-        args.sequence_dir, args.detection_file, args.output_file,
+        "./images", detector, args.output_file,
         args.min_confidence, args.nms_max_overlap, args.min_detection_height,
         args.max_cosine_distance, args.nn_budget, args.display)

@@ -172,9 +172,16 @@ def generate_detections(encoder, mot_dir, output_dir, detection_dir=None):
                 continue
             bgr_image = cv2.imread(
                 image_filenames[frame_idx], cv2.IMREAD_COLOR)
+            # print('-------------------------------------')
+            # print(rows[:, 2:6].copy())
+
             features = encoder(bgr_image, rows[:, 2:6].copy())
             detections_out += [np.r_[(row, feature)] for row, feature
                                in zip(rows, features)]
+            print('XXXXXX')
+            print(rows)
+            print('------')
+            print(rows[:, 2:6])
 
         output_filename = os.path.join(output_dir, "%s.npy" % sequence)
         np.save(
